@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <!-- 모바일 최적화를 위한 viewport 설정 (확대 방지) -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>매일 말씀 카드 제작기 (Mobile Pro)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Nanum+Myeongjo:wght@400;700;800&family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        /* 100dvh는 모바일 브라우저 주소창 증감에 반응하여 정확한 전체 화면을 유지합니다. */
+        body { font-family: 'Noto Sans KR', sans-serif; background-color: #f8fafc; color: #0f172a; height: 100dvh; }
+        .font-batang { font-family: 'Gowun Batang', serif; }
+        .font-myeongjo { font-family: 'Nanum Myeongjo', serif; }
+        .font-sans { font-family: 'Noto Sans KR', sans-serif; }
+        
+        input[type="range"] { accent-color: #4f46e5; }
+        /* 스크롤바 감추기 (모바일에서 깔끔하게) */
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        #toast { transition: opacity 0.3s, transform 0.3s; }
+        .toast-show { opacity: 1; transform: translate(-50%, 0); }
+        .toast-hide { opacity: 0; transform: translate(-50%, 20px); pointer-events: none; }
+
+        /* 체크박스 커스텀 디자인 */
+        input[type="checkbox"] { width: 1.2rem; height: 1.2rem; accent-color: #4f46e5; }
+    </style>
+</head>
+<body class="flex flex-col overflow-hidden">
+
+    <!-- Top Bar -->
+    <header class="bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between z-20 shrink-0">
+        <div class="flex items-center gap-2">
+            <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow">
+                <i class="fa-solid fa-cross text-sm"></i>
+            </div>
+            <div>
+                <h1 class="text-sm font-bold tracking-tight">말씀 카드 메이커</h1>
+                <p class="text-[9px] text-slate-400 font-medium">모바일 최적화 에디션</p>
+            </div>
+        </div>
+        <div class="flex gap-2">
+             <button onclick="document.getElementById('upload-img').click()" class="bg-slate-100 text-slate-700 px-3 py-1.5 rounded text-xs font-bold shadow-sm hover:bg-slate-200 active:scale-95 transition-all">
+                <i class="fa-solid fa-camera mr-1"></i> 배경 사진
+            </button>
+            <input type="file" id="upload-img" class="hidden" accept="image/*" onchange="loadUserImg(event)">
+        </div>
+    </header>
+
+    <!-- Main Layout Wrapper -->
+    <main class="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
+        
+        <!-- 1. Canvas Preview Area (Mobile: Top Fixed, Desktop: Right Side) -->
+        <section class="h-[45dvh] lg:h-full lg:flex-1 lg:order-2 bg-slate-200 flex justify-center items-center p-4 border-b lg:border-b-0 lg:border-l border-slate-300 relative shrink-0 shadow-inner z-10" id="canvas-wrap">
+            <!-- 캔버스가 상하좌우 어떤 환경에서도 잘리지 않고 1:1 비율로 축소되도록 wrapper 스타일 전면 수정 -->
+            <div class="relative bg-white shadow-xl rounded-lg overflow-hidden aspect-square max-h-full max-w-full shrink-0">
+                <canvas id="cv" class="w-full h-full block"></canvas>
+            </div>
+            <!-- Loading Indicator -->
+            <div id="loader" class="absolute inset-0 bg-slate-100/80 backdrop-blur-sm flex flex-col items-center justify-center z-20 hidden">
+                <i class="fa-solid fa-circle-notch fa-spin text-4xl text-indigo-500 mb-2"></i>
+                <span class="text-xs font-bold text-slate-600">렌더링 중...</span>
+            </div>
+        </section>
+
+        <!-- 2. Interactive Controls Area (Mobile: Scrollable Bottom, Desktop: Left Side) -->
+        <section class="flex-1 lg:w-[480px] lg:flex-none lg:order-1 bg-white overflow-y-auto scrollbar-hide p-4 pb-28 space-y-6">
+            
+            <!-- 템플릿 보관함 -->
+            <div class="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                <h3 class="text-xs font-extrabold text-slate-800 mb-2 flex items-center gap-1">
+                    <i class="fa-solid fa-bookmark text-indigo-500"></i> 내 템플릿 보관함
+                </h3>
+                <div class="grid grid-cols-3 gap-2" id="preset-slots-container">
+                    <!-- JS 렌더링 영역 -->
+                </div>
+            </div>
+
+            <!-- 전체 디자인 (테마/폰트/색상) -->
+            <div class="space-y-3">
+                <h3 class="text-sm font-bold text-slate-900 border-b border-slate-100 pb-1">전체 디자인</h3>
+                
+                <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-3">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs font-bold w-12 shrink-0">테마</span>
+                        <select id="preset-category" class="flex-1 p-2 text-xs border border-slate-300 rounded outline-none font-bold" onchange="changePresetCategory(this.value)">
+                            <option value="forest">🌲 고요한 숲 (자연)</option>
+                            <option value="sky">☁️ 평온한 하늘</option>
+                            <option value="warm">☕ 따스한 일상</option>
+                            <option value="night">🌙 묵상의 밤</option>
+                            <option value="ocean">🌊 잔잔한 바다</option>
+                            <option value="flower">🌸 은혜의 꽃</option>
+                        </select>
+                    </div>
+                    <div id="detailed-presets" class="grid grid-cols-4 gap-1.5">
+                        <!-- 이미지 프리셋 썸네일 -->
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-3 pt-2">
+                        <div>
+                            <label class="text-[10px] text-slate-500 block mb-1">블러(흐림): <span id="val-blur" class="font-bold">45px</span></label>
+                            <input type="range" id="range-blur" min="0" max="100" value="45" class="w-full h-1" oninput="updateCanvasUI()">
+                        </div>
+                        <div>
+                            <label class="text-[10px] text-slate-500 block mb-1">어둡기: <span id="val-dim" class="font-bold">30%</span></label>
+                            <input type="range" id="range-dim" min="0" max="80" value="30" class="w-full h-1" oninput="updateCanvasUI()">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-3">
+                    <div class="grid grid-cols-3 gap-1.5">
+                        <button onclick="setFont(&#39;&quot;Gowun Batang&quot;, serif&#39;)" id="btn-font-batang" class="py-2 text-xs border border-indigo-600 bg-indigo-50 text-indigo-700 font-bold rounded font-batang transition-colors">고운바탕</button>
+                        <button onclick="setFont(&#39;&quot;Nanum Myeongjo&quot;, serif&#39;)" id="btn-font-myeongjo" class="py-2 text-xs border border-slate-200 bg-white text-slate-600 rounded font-myeongjo transition-colors">나눔명조</button>
+                        <button onclick="setFont(&#39;&quot;Noto Sans KR&quot;, sans-serif&#39;)" id="btn-font-sans" class="py-2 text-xs border border-slate-200 bg-white text-slate-600 rounded font-sans transition-colors">노토산스</button>
+                    </div>
+                    <div class="flex gap-2 justify-center pt-1">
+                        <button onclick="setTextColor('#ffffff')" class="w-8 h-8 rounded-full bg-white border-2 border-slate-300 shadow ring-2 ring-offset-2 ring-indigo-500" id="color-white"></button>
+                        <button onclick="setTextColor('#1e293b')" class="w-8 h-8 rounded-full bg-slate-800 border-2 border-slate-600 shadow" id="color-dark"></button>
+                        <button onclick="setTextColor('#fef08a')" class="w-8 h-8 rounded-full bg-yellow-200 border-2 border-yellow-300 shadow" id="color-yellow"></button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 텍스트 편집기 -->
+            <div class="space-y-3">
+                <h3 class="text-sm font-bold text-slate-900 border-b border-slate-100 pb-1 mt-4">내용 편집</h3>
+                
+                <!-- 1. 머릿말 -->
+                <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                    <div class="flex justify-between items-center">
+                        <label class="text-xs font-bold text-slate-700 flex items-center gap-2">
+                            <input type="checkbox" id="toggle-header" checked onchange="updateCanvasUI()"> 상단 머릿말
+                        </label>
+                        <div class="flex bg-slate-100 rounded border border-slate-200 overflow-hidden">
+                            <button onclick="setElemAlign('header', 'left')" id="btn-header-left" class="p-1.5 px-3 text-xs bg-slate-100 text-slate-400"><i class="fa-solid fa-align-left"></i></button>
+                            <button onclick="setElemAlign('header', 'center')" id="btn-header-center" class="p-1.5 px-3 text-xs bg-indigo-600 text-white"><i class="fa-solid fa-align-center"></i></button>
+                            <button onclick="setElemAlign('header', 'right')" id="btn-header-right" class="p-1.5 px-3 text-xs bg-slate-100 text-slate-400"><i class="fa-solid fa-align-right"></i></button>
+                        </div>
+                    </div>
+                    <input type="text" id="input-header" value="오늘의 말씀" class="w-full p-2.5 text-sm border border-slate-300 rounded outline-none focus:border-indigo-500" oninput="updateCanvasUI()">
+                    <div class="flex gap-4 bg-slate-50 p-2 rounded">
+                        <div class="flex-1">
+                            <label class="text-[10px] text-slate-500 block mb-1">크기: <span id="val-header-size" class="font-bold text-slate-700">28px</span></label>
+                            <input type="range" id="size-header" min="14" max="50" value="28" class="w-full h-1" oninput="updateCanvasUI()">
+                        </div>
+                        <div class="flex-1">
+                            <label class="text-[10px] text-indigo-600 block mb-1 font-bold">Y 위치: <span id="val-header-pos">15%</span></label>
+                            <input type="range" id="pos-header" min="5" max="40" step="5" value="15" class="w-full h-1" oninput="updateCanvasUI()">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. 본문 -->
+                <div class="bg-white p-3 rounded-xl border border-indigo-200 shadow-sm shadow-indigo-100 space-y-3 relative overflow-hidden">
+                    <div class="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500"></div>
+                    <div class="flex justify-between items-center pl-2">
+                        <span class="text-xs font-bold text-slate-800">말씀 본문</span>
+                        <div class="flex bg-slate-100 rounded border border-slate-200 overflow-hidden">
+                            <button onclick="setElemAlign('verse', 'left')" id="btn-verse-left" class="p-1.5 px-3 text-xs bg-slate-100 text-slate-400"><i class="fa-solid fa-align-left"></i></button>
+                            <button onclick="setElemAlign('verse', 'center')" id="btn-verse-center" class="p-1.5 px-3 text-xs bg-indigo-600 text-white"><i class="fa-solid fa-align-center"></i></button>
+                            <button onclick="setElemAlign('verse', 'right')" id="btn-verse-right" class="p-1.5 px-3 text-xs bg-slate-100 text-slate-400"><i class="fa-solid fa-align-right"></i></button>
+                        </div>
+                    </div>
+                    <textarea id="input-verse" rows="4" class="w-full p-2.5 text-sm border border-slate-300 rounded outline-none resize-none focus:border-indigo-500 leading-relaxed" oninput="updateCanvasUI()">여호와는 나의 목자시니 내게 부족함이 없으리로다.&#10;그가 나를 푸른 풀밭에 누이시며&#10;쉴 만한 물가로 인도하시는도다.</textarea>
+                    
+                    <div class="grid grid-cols-2 gap-4 bg-slate-50 p-2 rounded">
+                        <div>
+                            <label class="text-[10px] text-slate-500 block mb-1">크기: <span id="val-verse-size" class="font-bold text-slate-700">42px</span></label>
+                            <input type="range" id="size-verse" min="20" max="70" value="42" class="w-full h-1" oninput="updateCanvasUI()">
+                        </div>
+                        <div>
+                            <label class="text-[10px] text-slate-500 block mb-1">줄간격: <span id="val-verse-height" class="font-bold text-slate-700">1.6</span></label>
+                            <input type="range" id="height-verse" min="1.2" max="2.5" step="0.1" value="1.6" class="w-full h-1" oninput="updateCanvasUI()">
+                        </div>
+                    </div>
+                    <div class="bg-indigo-50 p-2 rounded border border-indigo-100">
+                        <label class="text-[10px] text-indigo-600 block mb-1 font-bold">Y 위치 (중앙 기준): <span id="val-verse-pos">45%</span></label>
+                        <input type="range" id="pos-verse" min="20" max="80" step="5" value="45" class="w-full h-1" oninput="updateCanvasUI()">
+                    </div>
+                </div>
+
+                <!-- 3. 출처 -->
+                <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                    <div class="flex justify-between items-center">
+                        <label class="text-xs font-bold text-slate-700 flex items-center gap-2">
+                            <input type="checkbox" id="toggle-ref" checked onchange="updateCanvasUI()"> 성경 출처
+                        </label>
+                        <div class="flex bg-slate-100 rounded border border-slate-200 overflow-hidden">
+                            <button onclick="setElemAlign('ref', 'left')" id="btn-ref-left" class="p-1.5 px-3 text-xs bg-slate-100 text-slate-400"><i class="fa-solid fa-align-left"></i></button>
+                            <button onclick="setElemAlign('ref', 'center')" id="btn-ref-center" class="p-1.5 px-3 text-xs bg-indigo-600 text-white"><i class="fa-solid fa-align-center"></i></button>
+                            <button onclick="setElemAlign('ref', 'right')" id="btn-ref-right" class="p-1.5 px-3 text-xs bg-slate-100 text-slate-400"><i class="fa-solid fa-align-right"></i></button>
+                        </div>
+                    </div>
+                    <input type="text" id="input-ref" value="시편 23:1-2" class="w-full p-2.5 text-sm border border-slate-300 rounded outline-none focus:border-indigo-500" oninput="updateCanvasUI()">
+                    <div class="flex gap-4 bg-slate-50 p-2 rounded">
+                        <div class="flex-1">
+                            <label class="text-[10px] text-slate-500 block mb-1">크기: <span id="val-ref-size" class="font-bold text-slate-700">26px</span></label>
+                            <input type="range" id="size-ref" min="14" max="50" value="26" class="w-full h-1" oninput="updateCanvasUI()">
+                        </div>
+                        <div class="flex-1">
+                            <label class="text-[10px] text-indigo-600 block mb-1 font-bold">Y 위치: <span id="val-ref-pos">75%</span></label>
+                            <input type="range" id="pos-ref" min="50" max="95" step="5" value="75" class="w-full h-1" oninput="updateCanvasUI()">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. 꼬릿말 -->
+                <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                    <div class="flex justify-between items-center">
+                        <label class="text-xs font-bold text-slate-700 flex items-center gap-2">
+                            <input type="checkbox" id="toggle-footer" checked onchange="updateCanvasUI()"> 꼬릿말 (교회명 등)
+                        </label>
+                        <div class="flex bg-slate-100 rounded border border-slate-200 overflow-hidden">
+                            <button onclick="setElemAlign('footer', 'left')" id="btn-footer-left" class="p-1.5 px-3 text-xs bg-slate-100 text-slate-400"><i class="fa-solid fa-align-left"></i></button>
+                            <button onclick="setElemAlign('footer', 'center')" id="btn-footer-center" class="p-1.5 px-3 text-xs bg-indigo-600 text-white"><i class="fa-solid fa-align-center"></i></button>
+                            <button onclick="setElemAlign('footer', 'right')" id="btn-footer-right" class="p-1.5 px-3 text-xs bg-slate-100 text-slate-400"><i class="fa-solid fa-align-right"></i></button>
+                        </div>
+                    </div>
+                    <input type="text" id="input-footer" value="사랑교회 청년부" class="w-full p-2.5 text-sm border border-slate-300 rounded outline-none focus:border-indigo-500" oninput="updateCanvasUI()">
+                    <div class="flex gap-4 bg-slate-50 p-2 rounded">
+                        <div class="flex-1">
+                            <label class="text-[10px] text-slate-500 block mb-1">크기: <span id="val-footer-size" class="font-bold text-slate-700">20px</span></label>
+                            <input type="range" id="size-footer" min="10" max="40" value="20" class="w-full h-1" oninput="updateCanvasUI()">
+                        </div>
+                        <div class="flex-1">
+                            <label class="text-[10px] text-indigo-600 block mb-1 font-bold">Y 위치: <span id="val-footer-pos">90%</span></label>
+                            <input type="range" id="pos-footer" min="70" max="98" step="5" value="90" class="w-full h-1" oninput="updateCanvasUI()">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 장식 요소 (10% 이격 고정) -->
+            <div class="space-y-3">
+                <h3 class="text-sm font-bold text-slate-900 border-b border-slate-100 pb-1 mt-4">구분 장식 (각 요소간 10% 간격 자동 유지)</h3>
+                <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
+                    <div class="flex items-center justify-between">
+                        <label class="text-xs font-bold text-slate-600">머릿말 하단 장식</label>
+                        <select id="decor-header-verse" class="p-2 text-xs border border-slate-300 rounded outline-none bg-white font-medium" onchange="updateCanvasUI()">
+                            <option value="none">없음</option>
+                            <option value="quote_start" selected>시작 따옴표 (“)</option>
+                            <option value="line">미니멀 라인 (➖)</option>
+                        </select>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <label class="text-xs font-bold text-slate-600">출처 상단 장식</label>
+                        <select id="decor-verse-ref" class="p-2 text-xs border border-slate-300 rounded outline-none bg-white font-medium" onchange="updateCanvasUI()">
+                            <option value="none">없음</option>
+                            <option value="quote_end" selected>맺음 따옴표 (”)</option>
+                            <option value="line">미니멀 라인 (➖)</option>
+                        </select>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <label class="text-xs font-bold text-slate-600">꼬릿말 상단 장식</label>
+                        <select id="decor-ref-footer" class="p-2 text-xs border border-slate-300 rounded outline-none bg-white font-medium" onchange="updateCanvasUI()">
+                            <option value="none" selected>없음</option>
+                            <option value="line">미니멀 라인 (➖)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            
+        </section>
+    </main>
+
+    <!-- 플로팅 액션 버튼 (저장하기 - 모바일 우측 하단 고정) -->
+    <div class="fixed bottom-6 right-5 z-50">
+        <button onclick="downloadImg()" class="bg-indigo-600 text-white w-14 h-14 rounded-full shadow-2xl flex flex-col items-center justify-center hover:bg-indigo-700 hover:scale-105 active:scale-95 transition-all">
+            <i class="fa-solid fa-download text-lg"></i>
+            <span class="text-[9px] font-bold mt-0.5">저장</span>
+        </button>
+    </div>
+
+    <!-- Toast Alert -->
+    <div id="toast" class="fixed top-1/2 left-1/2 bg-slate-900/90 backdrop-blur text-white px-6 py-3 rounded-full shadow-2xl text-sm font-bold z-50 toast-hide flex items-center gap-2 max-w-[90%] w-max">
+        <i id="toast-icon" class="fa-solid fa-circle-check text-green-400"></i>
+        <span id="toast-msg">알림 메시지</span>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('cv');
+        const ctx = canvas.getContext('2d');
+        
+        // 1:1 고정 비율 (인스타그램 및 SNS 규격)
+        const C_WIDTH = 1080;
+        const C_HEIGHT = 1080;
+        canvas.width = C_WIDTH;
+        canvas.height = C_HEIGHT;
+
+        // 24종 고품질 감성 이미지 (Unsplash API)
+        const bgPresets = {
+            forest: [
+                'https://images.unsplash.com/photo-1448375240586-882707db888b?w=1080&q=80',
+                'https://images.unsplash.com/photo-1473448912268-2022ce9509d8?w=1080&q=80',
+                'https://images.unsplash.com/photo-1425913397330-cf8af2ff40a1?w=1080&q=80',
+                'https://images.unsplash.com/photo-1511497584788-876760111969?w=1080&q=80'
+            ],
+            sky: [
+                'https://images.unsplash.com/photo-1513002749550-c59d220b6e58?w=1080&q=80',
+                'https://images.unsplash.com/photo-1495562569060-2eec283d3391?w=1080&q=80',
+                'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=1080&q=80',
+                'https://images.unsplash.com/photo-1506260408121-e353d10b87c7?w=1080&q=80'
+            ],
+            warm: [
+                'https://images.unsplash.com/photo-1499916078039-922301b0eb9b?w=1080&q=80',
+                'https://images.unsplash.com/photo-1497935586351-b67a49e012bf?w=1080&q=80',
+                'https://images.unsplash.com/photo-1505909182942-e2f09aee3e89?w=1080&q=80',
+                'https://images.unsplash.com/photo-1487700160041-babef9c3cb55?w=1080&q=80'
+            ],
+            night: [
+                'https://images.unsplash.com/photo-1488866022504-f2584929ca5f?w=1080&q=80',
+                'https://images.unsplash.com/photo-1475274047050-1d0c0975c63e?w=1080&q=80',
+                'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=1080&q=80',
+                'https://images.unsplash.com/photo-1505322022379-7c3353ee6291?w=1080&q=80'
+            ],
+            ocean: [
+                'https://images.unsplash.com/photo-1505118380757-91f5f5632de0?w=1080&q=80',
+                'https://images.unsplash.com/photo-1439405326854-014607f694d7?w=1080&q=80',
+                'https://images.unsplash.com/photo-1471922694854-ff1b63b20054?w=1080&q=80',
+                'https://images.unsplash.com/photo-1505881402582-c5bc11054f91?w=1080&q=80'
+            ],
+            flower: [
+                'https://images.unsplash.com/photo-1490750967868-88cb4ecb07cb?w=1080&q=80',
+                'https://images.unsplash.com/photo-1460500063983-994d4c27756c?w=1080&q=80',
+                'https://images.unsplash.com/photo-1508610048659-a06b669e3321?w=1080&q=80',
+                'https://images.unsplash.com/photo-1465146344425-f00d5f5c8f07?w=1080&q=80'
+            ]
+        };
+
+        let bgImageObject = new Image();
+        let activeCategory = 'forest';
+        let activeIndex = 0;
+        
+        // 상태 변수
+        let selectedFont = '"Gowun Batang", serif';
+        let textColor = '#ffffff';
+        let alignments = { header: 'center', verse: 'center', ref: 'center', footer: 'center' };
+
+        window.onload = function() {
+            showLoader();
+            bgImageObject.crossOrigin = "anonymous";
+            bgImageObject.onload = function() {
+                hideLoader();
+                updateCanvas();
+            };
+            bgImageObject.onerror = function() {
+                hideLoader();
+                showToast("사진 로딩 실패. 기본 배경을 사용합니다.", false);
+                updateCanvas();
+            };
+            renderPresetUI();
+            changePresetCategory('forest');
+            selectDetailedPreset(0);
+        };
+
+        function showLoader() { document.getElementById('loader').classList.remove('hidden'); }
+        function hideLoader() { document.getElementById('loader').classList.add('hidden'); }
+
+        function updateCanvasUI() {
+            // 슬라이더 라벨 업데이트
+            document.getElementById('val-header-size').innerText = document.getElementById('size-header').value + 'px';
+            document.getElementById('val-header-pos').innerText = document.getElementById('pos-header').value + '%';
+            
+            document.getElementById('val-verse-size').innerText = document.getElementById('size-verse').value + 'px';
+            document.getElementById('val-verse-height').innerText = document.getElementById('height-verse').value;
+            document.getElementById('val-verse-pos').innerText = document.getElementById('pos-verse').value + '%';
+            
+            document.getElementById('val-ref-size').innerText = document.getElementById('size-ref').value + 'px';
+            document.getElementById('val-ref-pos').innerText = document.getElementById('pos-ref').value + '%';
+            
+            document.getElementById('val-footer-size').innerText = document.getElementById('size-footer').value + 'px';
+            document.getElementById('val-footer-pos').innerText = document.getElementById('pos-footer').value + '%';
+            
+            document.getElementById('val-blur').innerText = document.getElementById('range-blur').value + 'px';
+            document.getElementById('val-dim').innerText = document.getElementById('range-dim').value + '%';
+
+            updateCanvas();
+        }
+
+        // 디자인 핸들러
+        function setFont(fontStr) {
+            selectedFont = fontStr;
+            ['batang', 'myeongjo', 'sans'].forEach(f => {
+                const btn = document.getElementById('btn-font-' + f);
+                btn.className = btn.className.replace('border-indigo-600 bg-indigo-50 text-indigo-700', 'border-slate-200 bg-white text-slate-600');
+            });
+            let targetId = 'btn-font-batang';
+            if (fontStr.includes('Myeongjo')) targetId = 'btn-font-myeongjo';
+            if (fontStr.includes('Sans')) targetId = 'btn-font-sans';
+            
+            const activeBtn = document.getElementById(targetId);
+            activeBtn.className = activeBtn.className.replace('border-slate-200 bg-white text-slate-600', 'border-indigo-600 bg-indigo-50 text-indigo-700');
+            updateCanvas();
+        }
+
+        function setTextColor(hex) {
+            textColor = hex;
+            ['white', 'dark', 'yellow'].forEach(c => {
+                document.getElementById('color-' + c).classList.remove('ring-2', 'ring-offset-2', 'ring-indigo-500');
+            });
+            let cId = 'color-white';
+            if(hex === '#1e293b') cId = 'color-dark';
+            if(hex === '#fef08a') cId = 'color-yellow';
+            document.getElementById(cId).classList.add('ring-2', 'ring-offset-2', 'ring-indigo-500');
+            updateCanvas();
+        }
+
+        function setElemAlign(elem, align) {
+            alignments[elem] = align;
+            ['left', 'center', 'right'].forEach(a => {
+                const btn = document.getElementById(`btn-${elem}-${a}`);
+                btn.className = btn.className.replace('bg-indigo-600 text-white', 'bg-slate-100 text-slate-400');
+            });
+            const activeBtn = document.getElementById(`btn-${elem}-${align}`);
+            activeBtn.className = activeBtn.className.replace('bg-slate-100 text-slate-400', 'bg-indigo-600 text-white');
+            updateCanvas();
+        }
+
+        // 이미지 로딩 처리
+        function changePresetCategory(cat) {
+            activeCategory = cat;
+            const container = document.getElementById('detailed-presets');
+            container.innerHTML = '';
+            
+            bgPresets[cat].forEach((url, idx) => {
+                const btn = document.createElement('button');
+                btn.className = "w-full aspect-video rounded md:h-12 bg-cover bg-center border-2 border-transparent hover:border-indigo-400 transition-all opacity-70";
+                btn.style.backgroundImage = `url('${url}')`;
+                btn.onclick = () => selectDetailedPreset(idx);
+                container.appendChild(btn);
+            });
+            selectDetailedPreset(0);
+        }
+
+        function selectDetailedPreset(idx) {
+            showLoader();
+            activeIndex = idx;
+            const container = document.getElementById('detailed-presets');
+            Array.from(container.children).forEach((btn, i) => {
+                if (i === idx) {
+                    btn.classList.add('border-indigo-600', 'opacity-100', 'ring-2', 'ring-indigo-300', 'ring-offset-1');
+                    btn.classList.remove('border-transparent', 'opacity-70');
+                } else {
+                    btn.classList.remove('border-indigo-600', 'opacity-100', 'ring-2', 'ring-indigo-300', 'ring-offset-1');
+                    btn.classList.add('border-transparent', 'opacity-70');
+                }
+            });
+            bgImageObject.src = bgPresets[activeCategory][idx];
+        }
+
+        function loadUserImg(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                bgImageObject.removeAttribute('crossOrigin');
+                bgImageObject.src = event.target.result;
+            }
+            reader.readAsDataURL(file);
+        }
+
+        function updateCanvas() {
+            if (!bgImageObject.complete || bgImageObject.naturalWidth === 0) return;
+
+            ctx.clearRect(0, 0, C_WIDTH, C_HEIGHT);
+
+            // 1. 배경 이미지 & 블러 (Anti-Bleeding 방식 적용)
+            ctx.save();
+            const blurVal = parseInt(document.getElementById('range-blur').value);
+            if (blurVal > 0) ctx.filter = `blur(${blurVal}px)`;
+            
+            const scale = Math.max(C_WIDTH / bgImageObject.width, C_HEIGHT / bgImageObject.height);
+            // 블러 가장자리 허옇게 변하는 것 방지용 스케일업
+            const bleedScale = blurVal > 0 ? scale * 1.08 : scale; 
+            const w = bgImageObject.width * bleedScale;
+            const h = bgImageObject.height * bleedScale;
+            const x = (C_WIDTH - w) / 2;
+            const y = (C_HEIGHT - h) / 2;
+            
+            ctx.drawImage(bgImageObject, x, y, w, h);
+            ctx.restore();
+
+            // 2. 어둡기 (Dimming)
+            const dimVal = document.getElementById('range-dim').value;
+            ctx.fillStyle = `rgba(0,0,0,${dimVal / 100})`;
+            ctx.fillRect(0, 0, C_WIDTH, C_HEIGHT);
+
+            // 3. 텍스트 설정
+            ctx.fillStyle = textColor;
+            ctx.textBaseline = 'middle';
+
+            // Y축 위치 계산 (백분율 -> 픽셀)
+            const yHeader = C_HEIGHT * (document.getElementById('pos-header').value / 100);
+            const yVerse = C_HEIGHT * (document.getElementById('pos-verse').value / 100);
+            const yRef = C_HEIGHT * (document.getElementById('pos-ref').value / 100);
+            const yFooter = C_HEIGHT * (document.getElementById('pos-footer').value / 100);
+
+            // 요소 그리기 함수들
+            const isHeaderOn = document.getElementById('toggle-header').checked;
+            if (isHeaderOn) {
+                const s = document.getElementById('size-header').value;
+                ctx.font = `bold ${s}px ${selectedFont}`;
+                ctx.textAlign = alignments.header;
+                ctx.fillText(document.getElementById('input-header').value, getXOffset(alignments.header), yHeader);
+            }
+
+            const vText = document.getElementById('input-verse').value;
+            const vSize = document.getElementById('size-verse').value;
+            const vHeight = document.getElementById('height-verse').value;
+            ctx.font = `${vSize}px ${selectedFont}`;
+            drawWrappedText(ctx, vText, getXOffset(alignments.verse), yVerse, C_WIDTH - 200, vSize * vHeight, alignments.verse);
+
+            const isRefOn = document.getElementById('toggle-ref').checked;
+            if (isRefOn) {
+                const s = document.getElementById('size-ref').value;
+                ctx.font = `bold ${s}px ${selectedFont}`;
+                ctx.textAlign = alignments.ref;
+                ctx.fillText(document.getElementById('input-ref').value, getXOffset(alignments.ref), yRef);
+            }
+
+            const isFooterOn = document.getElementById('toggle-footer').checked;
+            if (isFooterOn) {
+                const s = document.getElementById('size-footer').value;
+                ctx.font = `${s}px ${selectedFont}`;
+                ctx.textAlign = alignments.footer;
+                ctx.fillText(document.getElementById('input-footer').value, getXOffset(alignments.footer), yFooter);
+            }
+
+            // 4. 장식 요소 그리기 (10% 간격 Anchoring)
+            const decHV = document.getElementById('decor-header-verse').value;
+            const decVR = document.getElementById('decor-verse-ref').value;
+            const decRF = document.getElementById('decor-ref-footer').value;
+            const offset10 = C_HEIGHT * 0.10; // 캔버스 높이의 10% (108px)
+
+            // 머릿말 장식: 머릿말 아래 10% 고정 (머릿말 켜져있을때만)
+            if (decHV !== 'none' && isHeaderOn) {
+                drawDecor(decHV, yHeader + offset10);
+            }
+
+            // 출처 장식: 출처 위 10% 고정 (출처 꺼져있으면 본문 아래 10% 위치로 이동)
+            if (decVR !== 'none') {
+                const anchorY = isRefOn ? (yRef - offset10) : (yVerse + offset10);
+                drawDecor(decVR, anchorY);
+            }
+
+            // 꼬릿말 장식: 꼬릿말 위 10% 고정 (꼬릿말 켜져있을때만)
+            if (decRF !== 'none' && isFooterOn) {
+                drawDecor(decRF, yFooter - offset10);
+            }
+        }
+
+        // 유틸리티 함수
+        function getXOffset(align) {
+            const padding = 100;
+            if (align === 'left') return padding;
+            if (align === 'right') return C_WIDTH - padding;
+            return C_WIDTH / 2;
+        }
+
+        function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight, align) {
+            const lines = text.split('\n');
+            let parsedLines = [];
+            
+            for (let i = 0; i < lines.length; i++) {
+                const words = lines[i].split(' ');
+                let currentLine = words[0];
+                for (let j = 1; j < words.length; j++) {
+                    const testLine = currentLine + ' ' + words[j];
+                    if (ctx.measureText(testLine).width > maxWidth) {
+                        parsedLines.push(currentLine);
+                        currentLine = words[j];
+                    } else {
+                        currentLine = testLine;
+                    }
+                }
+                parsedLines.push(currentLine);
+            }
+            
+            const blockHeight = (parsedLines.length - 1) * lineHeight;
+            let drawnY = y - (blockHeight / 2);
+            
+            ctx.textAlign = align;
+            for (let i = 0; i < parsedLines.length; i++) {
+                ctx.fillText(parsedLines[i], x, drawnY);
+                drawnY += lineHeight;
+            }
+        }
+
+        function drawDecor(type, yPos) {
+            ctx.fillStyle = textColor;
+            ctx.strokeStyle = textColor;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const centerX = C_WIDTH / 2;
+
+            if (type === 'line') {
+                ctx.lineWidth = 2;
+                const w = 40;
+                ctx.beginPath();
+                ctx.moveTo(centerX - w/2, yPos);
+                ctx.lineTo(centerX + w/2, yPos);
+                ctx.stroke();
+            } else if (type === 'quote_start') {
+                ctx.font = `bold 60px "Gowun Batang", serif`;
+                ctx.fillText('“', centerX, yPos + 15);
+            } else if (type === 'quote_end') {
+                ctx.font = `bold 60px "Gowun Batang", serif`;
+                ctx.fillText('”', centerX, yPos + 15);
+            }
+        }
+
+        function renderPresetUI() {
+            const container = document.getElementById('preset-slots-container');
+            container.innerHTML = '';
+            let saved = JSON.parse(localStorage.getItem('bible_maker_v2_presets') || '{}');
+
+            for(let i=1; i<=3; i++) {
+                const hasData = !!saved[i];
+                const div = document.createElement('div');
+                div.className = "bg-white border border-slate-200 rounded p-2 text-center";
+
+                const span = document.createElement('span');
+                span.className = `block text-[10px] font-bold mb-1.5 ${hasData ? 'text-indigo-600' : 'text-slate-400'}`;
+                span.innerText = `슬롯 ${i}`;
+                div.appendChild(span);
+
+                if (hasData) {
+                    const loadBtn = document.createElement('button');
+                    loadBtn.className = "w-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-bold py-1 mb-1 rounded hover:bg-indigo-100 active:scale-95";
+                    loadBtn.innerText = "불러오기";
+                    loadBtn.onclick = () => loadPreset(i);
+
+                    const saveBtn = document.createElement('button');
+                    saveBtn.className = "w-full bg-slate-100 text-slate-500 text-[9px] font-bold py-1 rounded hover:bg-slate-200 active:scale-95";
+                    saveBtn.innerText = "덮어쓰기";
+                    saveBtn.onclick = () => savePreset(i);
+
+                    div.appendChild(loadBtn);
+                    div.appendChild(saveBtn);
+                } else {
+                    const saveBtn = document.createElement('button');
+                    saveBtn.className = "w-full h-8 bg-slate-800 text-white text-[10px] font-bold rounded hover:bg-slate-900 active:scale-95 flex items-center justify-center gap-1";
+                    saveBtn.innerHTML = "<i class='fa-solid fa-download'></i> 저장";
+                    saveBtn.onclick = () => savePreset(i);
+                    div.appendChild(saveBtn);
+                }
+                container.appendChild(div);
+            }
+        }
+
+        function savePreset(slotIndex) {
+            const state = {
+                header: { val: document.getElementById('input-header').value, toggle: document.getElementById('toggle-header').checked, size: document.getElementById('size-header').value, pos: document.getElementById('pos-header').value, align: alignments.header },
+                verse: { val: document.getElementById('input-verse').value, size: document.getElementById('size-verse').value, height: document.getElementById('height-verse').value, pos: document.getElementById('pos-verse').value, align: alignments.verse },
+                ref: { val: document.getElementById('input-ref').value, toggle: document.getElementById('toggle-ref').checked, size: document.getElementById('size-ref').value, pos: document.getElementById('pos-ref').value, align: alignments.ref },
+                footer: { val: document.getElementById('input-footer').value, toggle: document.getElementById('toggle-footer').checked, size: document.getElementById('size-footer').value, pos: document.getElementById('pos-footer').value, align: alignments.footer },
+                decors: {
+                    hv: document.getElementById('decor-header-verse').value,
+                    vr: document.getElementById('decor-verse-ref').value,
+                    rf: document.getElementById('decor-ref-footer').value
+                },
+                bg: { category: activeCategory, index: activeIndex, blur: document.getElementById('range-blur').value, dim: document.getElementById('range-dim').value },
+                design: { font: selectedFont, color: textColor }
+            };
+
+            let saved = JSON.parse(localStorage.getItem('bible_maker_v2_presets') || '{}');
+            saved[slotIndex] = state;
+            localStorage.setItem('bible_maker_v2_presets', JSON.stringify(saved));
+            showToast(`슬롯 ${slotIndex} 저장 완료! 💾`, true);
+            renderPresetUI();
+        }
+
+        function loadPreset(slotIndex) {
+            let saved = JSON.parse(localStorage.getItem('bible_maker_v2_presets') || '{}');
+            const s = saved[slotIndex];
+            if(!s) return;
+
+            document.getElementById('input-header').value = s.header.val;
+            document.getElementById('toggle-header').checked = s.header.toggle;
+            document.getElementById('size-header').value = s.header.size;
+            document.getElementById('pos-header').value = s.header.pos;
+            
+            document.getElementById('input-verse').value = s.verse.val;
+            document.getElementById('size-verse').value = s.verse.size;
+            document.getElementById('height-verse').value = s.verse.height;
+            document.getElementById('pos-verse').value = s.verse.pos;
+            
+            document.getElementById('input-ref').value = s.ref.val;
+            document.getElementById('toggle-ref').checked = s.ref.toggle;
+            document.getElementById('size-ref').value = s.ref.size;
+            document.getElementById('pos-ref').value = s.ref.pos;
+            
+            document.getElementById('input-footer').value = s.footer.val;
+            document.getElementById('toggle-footer').checked = s.footer.toggle;
+            document.getElementById('size-footer').value = s.footer.size;
+            document.getElementById('pos-footer').value = s.footer.pos;
+
+            setElemAlign('header', s.header.align);
+            setElemAlign('verse', s.verse.align);
+            setElemAlign('ref', s.ref.align);
+            setElemAlign('footer', s.footer.align);
+            setFont(s.design.font);
+            setTextColor(s.design.color);
+
+            document.getElementById('decor-header-verse').value = s.decors.hv;
+            document.getElementById('decor-verse-ref').value = s.decors.vr;
+            document.getElementById('decor-ref-footer').value = s.decors.rf;
+
+            document.getElementById('range-blur').value = s.bg.blur;
+            document.getElementById('range-dim').value = s.bg.dim;
+
+            document.getElementById('preset-category').value = s.bg.category;
+            changePresetCategory(s.bg.category);
+            selectDetailedPreset(s.bg.index);
+
+            updateCanvasUI();
+            showToast(`슬롯 ${slotIndex} 불러오기 성공! 🔄`, true);
+        }
+
+        function showToast(msg, isSuccess = true) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-msg').innerText = msg;
+            
+            const icon = document.getElementById('toast-icon');
+            if (isSuccess) {
+                icon.className = "fa-solid fa-circle-check text-green-400";
+            } else {
+                icon.className = "fa-solid fa-circle-exclamation text-amber-400";
+            }
+
+            toast.classList.remove('toast-hide');
+            toast.classList.add('toast-show');
+            setTimeout(() => {
+                toast.classList.remove('toast-show');
+                toast.classList.add('toast-hide');
+            }, 2500);
+        }
+
+        function downloadImg() {
+            try {
+                const link = document.createElement('a');
+                link.download = `말씀카드_${new Date().getTime()}.png`;
+                link.href = canvas.toDataURL('image/png', 1.0);
+                link.click();
+                showToast("갤러리에 저장되었습니다! ✨", true);
+            } catch (e) {
+                showToast("저장 오류: 외부 사진 보안 정책때문일 수 있습니다.", false);
+            }
+        }
+    </script>
+</body>
+</html>
